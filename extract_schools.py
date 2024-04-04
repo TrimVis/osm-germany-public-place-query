@@ -64,11 +64,3 @@ if __name__ == "__main__":
     schools_df = extract_public_places(location, amenities)
     # Print the first few rows of the DataFrame to check the output
     pprint(schools_df[:10])
-
-    print("")
-    print("")
-    print("Searching for HGWT")
-    for s in schools_df:
-        if s.name and 'Hochrhein Gymnasium Waldshut' in s.name:
-            pprint("Found match:")
-            pprint(s)
