@@ -12,4 +12,4 @@
    - *Windows CMD*: `venv\Scripts\activate.bat`
    - *Windows PowerShell*: `venv\Scripts\Activate.ps1`
    - *Linux Bash*: `source venv/bin/activate`
-2. Start: `python extract_schools.py`
+2. Start: `python extract_public_places.py`
