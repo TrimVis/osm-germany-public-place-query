@@ -9,13 +9,18 @@ ox.settings.max_query_area_size = 25000000000
 
 
 class Institution(Enum):
-    social_center = "social_center"
-    kindergarten = "kindergarten"
-    school = "school"
-    college = "college"
+    playground = "leisure:playground"
+    community_center = "amenity:community_center"
+    social_center = "amenity:social_center"
+    kindergarten = "amenity:kindergarten"
+    school = "amenity:school"
+    college = "amenity:college"
 
 
-INSTITUTIONS = [member.value for member in Institution.__members__.values()]
+INSTITUTION_KEYS = list({
+    member.value.split(":")[0] for member in Institution.__members__.values()})
+INSTITUTIONS = [
+    member.value for member in Institution.__members__.values()]
 
 
 @dataclass(frozen=True)
@@ -26,25 +31,39 @@ class PublicPlace:
     lat: float
 
 
-def extract_public_places(place_name, amenities=INSTITUTIONS):
+def extract_public_places(place_name, institutions=INSTITUTIONS):
     data = []
 
-    for amenity in amenities:
+    for inst in institutions:
+        (c, i) = inst.split(":")
+        print(f"{c} - {i}")
         # Query OpenStreetMap for amenities in the specified place
         try:
             g = ox.features_from_place(
-                place_name, tags={"amenity": amenity}
+                place_name, tags={c: i}
             )
         except ox._errors.InsufficientResponseError:
-            print(f"Could not find any features for {amenity}...")
+            print(f"Could not find any features for {inst}...")
             print("Skipping")
             continue
 
-        print(f"Found {len(g)} features for {amenity}")
+        print(f"Found {len(g)} features for {inst}")
 
         for _, attr in g.iterrows():
             # Detect the institution kind
-            institution = Institution(attr['amenity'])
+            ikey = None
+            for k in INSTITUTION_KEYS:
+                v = str(attr.get(k))
+                temp = f"{k}:{v}"
+                if temp in INSTITUTIONS:
+                    ikey = temp
+                    break
+
+            if ikey is None:
+                print("Received unexpected institution")
+                exit(1)
+
+            institution = Institution(ikey)
 
             # Extract the name, if available, else use None
             name = attr.get('name', None)
