@@ -10,9 +10,11 @@ ox.settings.max_query_area_size = 25000000000
 
 class Institution(Enum):
     playground = "leisure:playground"
-    community_center = "amenity:community_center"
-    social_center = "amenity:social_center"
+    social_facility = "amenity:social_facility"
+    community_centre = "amenity:community_centre"
+    social_centre = "amenity:social_centre"
     kindergarten = "amenity:kindergarten"
+    childcare = "amenity:childcare"
     school = "amenity:school"
     college = "amenity:college"
 
@@ -65,7 +67,6 @@ def extract_public_places(place_name, institutions=INSTITUTIONS):
 
             institution = Institution(ikey)
 
-            # Extract the name, if available, else use None
             name = attr.get('name', None)
             if not isinstance(name, str):
                 name = None
@@ -106,7 +107,7 @@ def find_visible_areas(areas):
 
 # Example usage
 if __name__ == "__main__":
-    location = "Baden-Wuerttemberg, Germany"
+    location = "Waldshut, Baden-Wuerttemberg, Germany"
     pp = extract_public_places(location)
     # Print the first few rows of the DataFrame to check the output
     pprint(pp[:10])
