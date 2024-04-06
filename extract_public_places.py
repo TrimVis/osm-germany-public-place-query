@@ -9,8 +9,13 @@ ox.settings.max_query_area_size = 25000000000
 
 
 class Institution(Enum):
+    social_center = "social_center"
+    kindergarten = "kindergarten"
     school = "school"
     college = "college"
+
+
+INSTITUTIONS = [member.value for member in Institution.__members__.values()]
 
 
 @dataclass(frozen=True)
@@ -21,14 +26,21 @@ class PublicPlace:
     lat: float
 
 
-def extract_public_places(place_name, amenities):
+def extract_public_places(place_name, amenities=INSTITUTIONS):
     data = []
 
     for amenity in amenities:
         # Query OpenStreetMap for amenities in the specified place
-        g = ox.features_from_place(
-            place_name, tags={"amenity": amenity}
-        )
+        try:
+            g = ox.features_from_place(
+                place_name, tags={"amenity": amenity}
+            )
+        except ox._errors.InsufficientResponseError:
+            print(f"Could not find any features for {amenity}...")
+            print("Skipping")
+            continue
+
+        print(f"Found {len(g)} features for {amenity}")
 
         for _, attr in g.iterrows():
             # Detect the institution kind
@@ -57,10 +69,25 @@ def extract_public_places(place_name, amenities):
     return data
 
 
+def find_visible_areas(areas):
+    # TODO pjordan: We should also take into consideration the buildings around it
+    for area in areas:
+        _lon, _lat = area.lon, area.lat
+
+        # Step 1: Find ground level of this building
+        # (might need to be extracted in extract_public_places)
+        # Step 2: Find all buildings in a 100m area around it's outline
+        # (currently we only have knowledge of its center)
+        # Step 3: Mark areas:
+        #    a) Mark all areas as "potentially visible"  100m around the outline
+        #    b) Mark all areas that have a clear direct viewline as "visible"
+
+        pass
+
+
 # Example usage
 if __name__ == "__main__":
     location = "Baden-Wuerttemberg, Germany"
-    amenities = ["school", "college"]
-    schools_df = extract_public_places(location, amenities)
+    pp = extract_public_places(location)
     # Print the first few rows of the DataFrame to check the output
-    pprint(schools_df[:10])
+    pprint(pp[:10])
