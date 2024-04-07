@@ -49,7 +49,8 @@ def create_smoke_mask(public_places):
     no_smoke_gdf = no_smoke_gdf.to_crs(epsg=4326)
 
     no_smoke_mask = geometry_mask(no_smoke_gdf.geometry, transform=transform,
-                                  out_shape=(height, width), all_touched=True)
+                                  invert=True, out_shape=(height, width),
+                                  all_touched=True)
     probably_smoke_mask = np.zeros((height, width), dtype=np.bool_)
 
     return SmokeMask(no_smoke_mask, probably_smoke_mask)
@@ -80,7 +81,6 @@ def create_world_raster(smoke_mask, germany_mask, output_path='smoke_map.tif'):
 
         # Initialize the raster with 0
         world = np.zeros((4, height, width), dtype=np.uint8)
-
 
         # Mark everything as green initially
         world[1, :, :] = 255
@@ -115,4 +115,4 @@ if __name__ == "__main__":
     smoke_mask = create_smoke_mask(public_places)
     germany_mask = get_germany_mask()
     create_world_raster(smoke_mask, germany_mask)
-    create_tiles()
+    # create_tiles()
