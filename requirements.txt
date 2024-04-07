@@ -1,2 +1,7 @@
 osmnx==1.9.2
 geopandas==0.14.3
+numpy
+rasterio
+scipy
+gdal2tiles
+gdal==3.8.4
