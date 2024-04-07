@@ -33,7 +33,8 @@ def create_world_raster(germany_shape, output_path='world_map.tif'):
         'count': 1,
         'dtype': 'uint8',
         'crs': 'EPSG:4326',
-        'transform': transform
+        'transform': transform,
+        'compress': 'deflate'
     }
 
     with rasterio.open(output_path, 'w', **metadata) as dst:
@@ -53,8 +54,8 @@ def create_world_raster(germany_shape, output_path='world_map.tif'):
 
 def create_tiles(tif_path='world_map.tif', out_dir="tiles/"):
     gdal2tiles.generate_tiles(
-        tif_path, out_dir, zoom="0-17", profile="mercator", kml=False,
-        nb_processes=8)
+        tif_path, out_dir, zoom="0-5", profile="mercator", kml=False,
+        nb_processes=8, resampling='antialias')
 
 
 if __name__ == "__main__":
