@@ -6,7 +6,7 @@ import osmnx as ox
 import gdal2tiles
 
 ox.settings.use_cache = True
-ox.settings.log_console = True
+ox.settings.log_console = False
 
 
 def get_germany_shape():
@@ -54,8 +54,8 @@ def create_world_raster(germany_shape, output_path='world_map.tif'):
 
 def create_tiles(tif_path='world_map.tif', out_dir="tiles/"):
     gdal2tiles.generate_tiles(
-        tif_path, out_dir, zoom="0-5", profile="mercator", kml=False,
-        nb_processes=8, resampling='antialias')
+        tif_path, out_dir, resume=True, zoom="0-7", profile="mercator",
+        kml=False, nb_processes=8, resampling='cubic')
 
 
 if __name__ == "__main__":

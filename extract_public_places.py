@@ -25,6 +25,8 @@ INSTITUTION_KEYS = list({
 INSTITUTIONS = [
     member.value for member in Institution.__members__.values()]
 
+ShapeType = Point | Polygon | MultiPolygon | LineString | MultiLineString
+
 
 @dataclass(frozen=True)
 class PublicPlace:
@@ -32,6 +34,7 @@ class PublicPlace:
     name: str | None
     lon: float
     lat: float
+    shape: ShapeType
 
 
 def extract_public_places(place_name, institutions=INSTITUTIONS):
@@ -46,8 +49,7 @@ def extract_public_places(place_name, institutions=INSTITUTIONS):
                 place_name, tags={c: i}
             )
         except ox._errors.InsufficientResponseError:
-            print(f"Could not find any features for {inst}...")
-            print("Skipping")
+            print(f"Could not find any features for {inst}. Skipping entry")
             continue
 
         print(f"Found {len(g)} features for {inst}")
@@ -82,28 +84,12 @@ def extract_public_places(place_name, institutions=INSTITUTIONS):
             # Append the school's name and coordinates to the list
             if lon is not None and lat is not None:
                 data.append(
-                    PublicPlace(institution=institution,
-                                name=name, lon=lon, lat=lat))
+                    PublicPlace(institution=institution, name=name,
+                                lon=lon, lat=lat, shape=attr.geometry))
             else:
-                print("Missing location for institution")
+                print("Missing location for institution. Skipping entry")
 
     return data
-
-
-def find_visible_areas(areas):
-    # TODO pjordan: We should also take into consideration the buildings around it
-    for area in areas:
-        _lon, _lat = area.lon, area.lat
-
-        # Step 1: Find ground level of this building
-        # (might need to be extracted in extract_public_places)
-        # Step 2: Find all buildings in a 100m area around it's outline
-        # (currently we only have knowledge of its center)
-        # Step 3: Mark areas:
-        #    a) Mark all areas as "potentially visible"  100m around the outline
-        #    b) Mark all areas that have a clear direct viewline as "visible"
-
-        pass
 
 
 # Example usage
