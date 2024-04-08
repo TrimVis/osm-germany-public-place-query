@@ -5,6 +5,7 @@ from rasterio.features import geometry_mask
 from rasterio.transform import from_origin
 from geopandas import GeoDataFrame
 from dataclasses import dataclass
+import shapely
 from typing import Any
 from tqdm import tqdm
 import gdal2tiles
@@ -50,14 +51,20 @@ def smoke_mask_callback(public_places):
         theight, twidth = (window.height, window.width)
         if debug:
             print("Smoke Mask Callback called")
-        # TODO pjordan: Cut with visible area
 
-        no_smoke_mask = geometry_mask(no_smoke_gdf.geometry, transform=transform_fn,
-                                      invert=True, out_shape=(theight, twidth),
-                                      all_touched=True)
-        probably_smoke_mask = np.zeros((theight, twidth), dtype=np.bool_)
+        if shapely.box(
+            window.col_off,  window.row_off,
+            window.col_off + window.width, window.row_off + window.height
+        ).intersects(no_smoke_gdf.geometry.any()):
+            no_smoke_mask = geometry_mask(no_smoke_gdf.geometry,
+                                          transform=transform_fn,
+                                          out_shape=(theight, twidth),
+                                          invert=True,
+                                          all_touched=True)
+            probably_smoke_mask = np.zeros((theight, twidth), dtype=np.bool_)
 
-        return SmokeMask(no_smoke_mask, probably_smoke_mask)
+            return SmokeMask(no_smoke_mask, probably_smoke_mask)
+        return None
 
     print("Generated smoke_mask_callback")
     return callback
@@ -70,10 +77,16 @@ def germany_mask_callback():
         theight, twidth = (window.height, window.width)
         if debug:
             print("Germany Mask Callback called")
-        return geometry_mask([germany_shape], invert=True,
-                             transform=transform_fn,
-                             out_shape=(theight, twidth),
-                             all_touched=True)
+
+        if shapely.box(
+            window.col_off,  window.row_off,
+            window.col_off + window.width, window.row_off + window.height
+        ).intersects(germany_shape):
+            return geometry_mask([germany_shape], invert=True,
+                                 transform=transform_fn,
+                                 out_shape=(theight, twidth),
+                                 all_touched=True)
+        return None
 
     print("Generated germany_mask_callback")
     return callback
@@ -81,6 +94,7 @@ def germany_mask_callback():
 
 def create_world_raster(public_places, output_path='smoke_map.tif'):
     # Simplified raster dimensions
+    w_blocks, h_blocks = 10, 100
     width, height = 720000, 360000
     degree = 360 / width
     # World coverage with a simple pixel degree resolution
@@ -94,8 +108,8 @@ def create_world_raster(public_places, output_path='smoke_map.tif'):
         'crs': 'EPSG:4326',
         'transform': from_origin(-180, 90, degree, degree),
         'compress': 'deflate',
-        'blockxsize': height/10,
-        'blockysize': width/100,
+        'blockxsize': height/h_blocks,
+        'blockysize': width/w_blocks,
         'tiled': True
     }
 
@@ -110,7 +124,7 @@ def create_world_raster(public_places, output_path='smoke_map.tif'):
         }
 
         # Iterate over the raster in windows
-        for ji, window in tqdm(dst.block_windows(1)):
+        for ji, window in tqdm(dst.block_windows(1), total=w_blocks*h_blocks):
             # Initialize the raster with 0
             if debug:
                 print(f"Analyzing Block: {window}")
@@ -126,13 +140,15 @@ def create_world_raster(public_places, output_path='smoke_map.tif'):
             germany_mask = get_germany_mask(
                 window=window, transform_fn=dst.window_transform(window))
 
-            # Mark germany as green initially
-            world[0, germany_mask] = 1
+            if germany_mask is not None:
+                # Mark germany as green initially
+                world[0, germany_mask] = 1
 
-            # Mark probably smoke zones
-            world[0, smoke_mask.probably] = 2
-            # Mark no smoke zones
-            world[0, smoke_mask.forbidden] = 3
+            if smoke_mask:
+                # Mark probably smoke zones
+                world[0, smoke_mask.probably] = 2
+                # Mark no smoke zones
+                world[0, smoke_mask.forbidden] = 3
 
             # Make everything darker except for germany
             # world[0, ~germany_mask] = 4
