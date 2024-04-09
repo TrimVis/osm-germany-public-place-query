@@ -80,12 +80,12 @@ def germany_mask_callback():
         if debug:
             print("Germany Mask Callback called")
 
-        # NOTE pjordan: As we do know some the current coordinates we could significantly
-        # speed this up, by calculating the expected positions first and checking if we could
-        # be in germany... But let's just wait for half an hour for now 😂
-        # if True:
-        if shapely.box(*bounds(window, transform)) \
-                .intersects(germany_shape):
+        # NOTE pjordan: As we do know some the current coordinates we
+        # could significantly speed this up, by calculating the expected
+        # positions first and checking if we could be in germany...
+        # But let's just wait for half an hour for now 😂
+
+        if shapely.box(*bounds(window, transform)).intersects(germany_shape):
             return geometry_mask([germany_shape], invert=True,
                                  transform=window_transform,
                                  out_shape=(theight, twidth),
@@ -121,9 +121,6 @@ def compute_window(output_path, write_lock,
         # Mark no smoke zones
         world[0, smoke_mask.forbidden] = 255
         world[1, smoke_mask.forbidden] = 0
-
-    # Make everything darker except for germany
-    # world[0, ~germany_mask] = 4
 
     # Write out computed values at correct position
     with write_lock:
@@ -161,20 +158,10 @@ def create_world_raster(public_places, output_path='smoke_map.tif'):
         # Extract required windows
         windows = [window for _, window in dst.block_windows()]
 
-        # # write out colormap
-        # colormap = {
-        #     0: (0, 0, 0, 200),
-        #     6**1: (0, 255, 0, 100),
-        #     6**2: (255, 255, 0, 100),
-        #     6**3: (255, 0, 0, 100),
-        # }
-        # dst.write_colormap(1, colormap)
-
+    create_smoke_mask = smoke_mask_callback(public_places)
+    get_germany_mask = germany_mask_callback()
     # write the actual tif file content across multiple processes
     with tqdm(total=len(windows)) as pbar:
-        create_smoke_mask = smoke_mask_callback(public_places)
-        get_germany_mask = germany_mask_callback()
-
         with multiprocessing.Manager() as man:
             write_lock = man.Lock()
             # for window in windows:
@@ -184,7 +171,7 @@ def create_world_raster(public_places, output_path='smoke_map.tif'):
             #         create_smoke_mask, get_germany_mask
             #     )
             #     pbar.update(1)
-            with concurrent.futures.ProcessPoolExecutor(max_workers=8) \
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) \
                     as executor:
                 futures = {
                     executor.submit(
@@ -209,4 +196,5 @@ if __name__ == "__main__":
     location = "Waldshut, Baden-Wuerttemberg, Germany"
     public_places = extract_public_places(location)
     create_world_raster(public_places)
+    # create_tiles()
     # create_tiles()
