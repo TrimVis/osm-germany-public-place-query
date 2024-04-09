@@ -31,7 +31,26 @@ class SmokeMask:
 
 # TODO pjordan: Process everything in chunks
 
-def smoke_mask_callback(public_places):
+def create_smoke_mask(no_smoke_wkt, window, transform, window_transform):
+    no_smoke_gdf = shapely.wkt.loads(no_smoke_wkt)
+    theight, twidth = (window.height, window.width)
+    if debug:
+        print("Smoke Mask Callback called")
+
+    if shapely.box(*bounds(window, transform)) \
+            .intersects(no_smoke_gdf.geometry.any()):
+        no_smoke_mask = geometry_mask(no_smoke_gdf.geometry,
+                                      transform=window_transform,
+                                      out_shape=(theight, twidth),
+                                      invert=True,
+                                      all_touched=True)
+        probably_smoke_mask = np.zeros((theight, twidth), dtype=np.bool_)
+
+        return SmokeMask(no_smoke_mask, probably_smoke_mask)
+    return None
+
+
+def smoke_mask_data(public_places):
     # TODO pjordan: We should also take into consideration the buildings around it
     # Step 1: Find ground level of this building
     # (might need to be extracted in extract_public_places)
@@ -51,58 +70,42 @@ def smoke_mask_callback(public_places):
     no_smoke_gdf.geometry = no_smoke_gdf.buffer(100)
     no_smoke_gdf = no_smoke_gdf.to_crs(epsg=4326)
 
-    def callback(no_smoke_wkt, window, transform, window_transform):
-        no_smoke_gdf = shapely.wkt.loads(no_smoke_wkt)
-        theight, twidth = (window.height, window.width)
-        if debug:
-            print("Smoke Mask Callback called")
-
-        if shapely.box(*bounds(window, transform)) \
-                .intersects(no_smoke_gdf.geometry.any()):
-            no_smoke_mask = geometry_mask(no_smoke_gdf.geometry,
-                                          transform=window_transform,
-                                          out_shape=(theight, twidth),
-                                          invert=True,
-                                          all_touched=True)
-            probably_smoke_mask = np.zeros((theight, twidth), dtype=np.bool_)
-
-            return SmokeMask(no_smoke_mask, probably_smoke_mask)
-        return None
-
     print("Generated smoke_mask_callback")
-    return (no_smoke_gdf.to_wkt(), callback)
+    return no_smoke_gdf.to_wkt()
 
 
-def germany_mask_callback():
+def create_germany_mask(germany_wkt, window, transform, window_transform):
+    germany_shape = shapely.wkt.loads(germany_wkt)
+    theight, twidth = (window.height, window.width)
+
+    if debug:
+        print("Germany Mask Callback called")
+
+    # NOTE pjordan: As we do know some the current coordinates we
+    # could significantly speed this up, by calculating the expected
+    # positions first and checking if we could be in germany...
+    # But let's just wait for half an hour for now 😂
+
+    if shapely.box(*bounds(window, transform)).intersects(germany_shape):
+        return geometry_mask([germany_shape], invert=True,
+                             transform=window_transform,
+                             out_shape=(theight, twidth),
+                             all_touched=True)
+    return None
+
+
+def germany_mask_data():
     germany_shape = get_germany_shape()
 
-    def callback(germany_wkt, window, transform, window_transform):
-        germany_shape = shapely.wkt.loads(germany_wkt)
-        theight, twidth = (window.height, window.width)
-
-        if debug:
-            print("Germany Mask Callback called")
-
-        # NOTE pjordan: As we do know some the current coordinates we
-        # could significantly speed this up, by calculating the expected
-        # positions first and checking if we could be in germany...
-        # But let's just wait for half an hour for now 😂
-
-        if shapely.box(*bounds(window, transform)).intersects(germany_shape):
-            return geometry_mask([germany_shape], invert=True,
-                                 transform=window_transform,
-                                 out_shape=(theight, twidth),
-                                 all_touched=True)
-        return None
-
     print("Generated germany_mask_callback")
-    return (germany_shape.wkt, callback)
+    return germany_shape.wkt
 
 
 def compute_window(output_path, write_lock,
                    window, transform,
-                   no_smoke_wkt, create_smoke_mask,
-                   germany_wkt, get_germany_mask):
+                   no_smoke_wkt, germany_wkt):
+    print(output_path, write_lock,
+          window, transform)
     # Compute all values
     world = np.full((4, window.height, window.width),
                     190, dtype=np.uint8)
@@ -111,7 +114,7 @@ def compute_window(output_path, write_lock,
     smoke_mask = create_smoke_mask(
         no_smoke_wkt,
         window=window, transform=transform, window_transform=window_transform)
-    germany_mask = get_germany_mask(
+    germany_mask = create_germany_mask(
         germany_wkt,
         window=window, transform=transform, window_transform=window_transform)
 
@@ -164,8 +167,8 @@ def create_world_raster(public_places, output_path='smoke_map.tif'):
         # Extract required windows
         windows = [window for _, window in dst.block_windows()]
 
-    (no_smoke_wkt, create_smoke_mask) = smoke_mask_callback(public_places)
-    (germany_wkt, get_germany_mask) = germany_mask_callback()
+    no_smoke_wkt = smoke_mask_data(public_places)
+    germany_wkt = germany_mask_data()
     # write the actual tif file content across multiple processes
     with tqdm(total=len(windows)) as pbar:
         with multiprocessing.Manager() as man:
@@ -179,15 +182,14 @@ def create_world_raster(public_places, output_path='smoke_map.tif'):
             #     )
             #     pbar.update(1)
 
-            with concurrent.futures.ProcessPoolExecutor(max_workers=8) \
+            with concurrent.futures.ProcessPoolExecutor(max_workers=1) \
                     as executor:
                 futures = {
                     executor.submit(
                         compute_window,
                         output_path, write_lock,
                         window, transform,
-                        no_smoke_wkt, create_smoke_mask,
-                        germany_wkt, get_germany_mask
+                        no_smoke_wkt, germany_wkt,
                     ) for window in windows
                 }
                 for _ in concurrent.futures.as_completed(futures):
