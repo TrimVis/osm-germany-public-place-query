@@ -3,12 +3,15 @@ import numpy as np
 import rasterio
 from rasterio.features import geometry_mask
 from rasterio.transform import from_origin
+from rasterio.windows import bounds, transform as wtransform
 from geopandas import GeoDataFrame
 from dataclasses import dataclass
 import shapely
 from typing import Any
 from tqdm import tqdm
 import gdal2tiles
+import multiprocessing
+import concurrent.futures
 
 from extract_public_places import extract_public_places
 from create_german_layer import get_germany_shape
@@ -47,17 +50,15 @@ def smoke_mask_callback(public_places):
     no_smoke_gdf.geometry = no_smoke_gdf.buffer(100)
     no_smoke_gdf = no_smoke_gdf.to_crs(epsg=4326)
 
-    def callback(window, transform_fn):
+    def callback(window, transform, window_transform):
         theight, twidth = (window.height, window.width)
         if debug:
             print("Smoke Mask Callback called")
 
-        if shapely.box(
-            window.col_off,  window.row_off,
-            window.col_off + window.width, window.row_off + window.height
-        ).intersects(no_smoke_gdf.geometry.any()):
+        if shapely.box(*bounds(window, transform)) \
+                .intersects(no_smoke_gdf.geometry.any()):
             no_smoke_mask = geometry_mask(no_smoke_gdf.geometry,
-                                          transform=transform_fn,
+                                          transform=window_transform,
                                           out_shape=(theight, twidth),
                                           invert=True,
                                           all_touched=True)
@@ -73,17 +74,20 @@ def smoke_mask_callback(public_places):
 def germany_mask_callback():
     germany_shape = get_germany_shape()
 
-    def callback(window, transform_fn):
+    def callback(window, transform, window_transform):
         theight, twidth = (window.height, window.width)
+
         if debug:
             print("Germany Mask Callback called")
 
-        if shapely.box(
-            window.col_off,  window.row_off,
-            window.col_off + window.width, window.row_off + window.height
-        ).intersects(germany_shape):
+        # NOTE pjordan: As we do know some the current coordinates we could significantly
+        # speed this up, by calculating the expected positions first and checking if we could
+        # be in germany... But let's just wait for half an hour for now 😂
+        # if True:
+        if shapely.box(*bounds(window, transform)) \
+                .intersects(germany_shape):
             return geometry_mask([germany_shape], invert=True,
-                                 transform=transform_fn,
+                                 transform=window_transform,
                                  out_shape=(theight, twidth),
                                  all_touched=True)
         return None
@@ -92,69 +96,106 @@ def germany_mask_callback():
     return callback
 
 
+def compute_window(output_path, write_lock,
+                   window, transform,
+                   create_smoke_mask, get_germany_mask):
+    # Compute all values
+    world = np.full((4, window.height, window.width),
+                    190, dtype=np.uint8)
+
+    window_transform = wtransform(window, transform)
+    smoke_mask = create_smoke_mask(
+        window=window, transform=transform, window_transform=window_transform)
+    germany_mask = get_germany_mask(
+        window=window, transform=transform, window_transform=window_transform)
+
+    if germany_mask is not None:
+        # Mark germany as green initially
+        world[0, germany_mask] = 0
+        world[1, germany_mask] = 255
+        world[2, germany_mask] = 0
+
+    if smoke_mask:
+        # Mark probably smoke zones
+        world[0, smoke_mask.probably] = 255
+        # Mark no smoke zones
+        world[0, smoke_mask.forbidden] = 255
+        world[1, smoke_mask.forbidden] = 0
+
+    # Make everything darker except for germany
+    # world[0, ~germany_mask] = 4
+
+    # Write out computed values at correct position
+    with write_lock:
+        print(f"{window}: Writing to file")
+        with rasterio.open(output_path, 'r+') as dst:
+            dst.write(world, window=window)
+        print(f"{window}: Finished writing to file")
+
+
 def create_world_raster(public_places, output_path='smoke_map.tif'):
     # Simplified raster dimensions
-    w_blocks, h_blocks = 10, 100
-    width, height = 720000, 360000
+    w_blocks, h_blocks = 4, 2
+    width, height = 14400, 7200
     degree = 360 / width
+    transform = from_origin(-180, 90, degree, degree)
+
     # World coverage with a simple pixel degree resolution
     # Raster metadata
     metadata = {
         'driver': 'GTiff',
         'height': height,
         'width': width,
-        'count': 1,
+        'count': 4,
         'dtype': 'uint8',
         'crs': 'EPSG:4326',
-        'transform': from_origin(-180, 90, degree, degree),
+        'transform': transform,
         'compress': 'deflate',
         'blockxsize': height/h_blocks,
         'blockysize': width/w_blocks,
-        'tiled': True
+        'tiled': True,
+        'photometric': 'RGB',
     }
 
     with rasterio.open(output_path, 'w', **metadata) as dst:
+        # Extract required windows
+        windows = [window for _, window in dst.block_windows()]
+
+        # # write out colormap
+        # colormap = {
+        #     0: (0, 0, 0, 200),
+        #     6**1: (0, 255, 0, 100),
+        #     6**2: (255, 255, 0, 100),
+        #     6**3: (255, 0, 0, 100),
+        # }
+        # dst.write_colormap(1, colormap)
+
+    # write the actual tif file content across multiple processes
+    with tqdm(total=len(windows)) as pbar:
         create_smoke_mask = smoke_mask_callback(public_places)
         get_germany_mask = germany_mask_callback()
-        colormap = {
-            0: (0, 0, 0, 200),
-            1: (0, 255, 0, 100),
-            2: (255, 255, 0, 100),
-            3: (255, 0, 0, 100),
-        }
 
-        # Iterate over the raster in windows
-        for ji, window in tqdm(dst.block_windows(1), total=w_blocks*h_blocks):
-            # Initialize the raster with 0
-            if debug:
-                print(f"Analyzing Block: {window}")
-
-            # 0 = grey
-            # 1 = green
-            # 2 = yellow
-            # 3 = red
-            world = np.zeros((1, window.height, window.width), dtype=np.uint8)
-
-            smoke_mask = create_smoke_mask(
-                window=window, transform_fn=dst.window_transform(window))
-            germany_mask = get_germany_mask(
-                window=window, transform_fn=dst.window_transform(window))
-
-            if germany_mask is not None:
-                # Mark germany as green initially
-                world[0, germany_mask] = 1
-
-            if smoke_mask:
-                # Mark probably smoke zones
-                world[0, smoke_mask.probably] = 2
-                # Mark no smoke zones
-                world[0, smoke_mask.forbidden] = 3
-
-            # Make everything darker except for germany
-            # world[0, ~germany_mask] = 4
-
-            dst.write(world, window=window)
-        dst.write_colormap(1, colormap)
+        with multiprocessing.Manager() as man:
+            write_lock = man.Lock()
+            # for window in windows:
+            #     compute_window(
+            #         output_path, write_lock,
+            #         window, transform,
+            #         create_smoke_mask, get_germany_mask
+            #     )
+            #     pbar.update(1)
+            with concurrent.futures.ProcessPoolExecutor(max_workers=8) \
+                    as executor:
+                futures = {
+                    executor.submit(
+                        compute_window,
+                        output_path, write_lock,
+                        window, transform,
+                        create_smoke_mask, get_germany_mask
+                    ) for window in windows
+                }
+                for _ in concurrent.futures.as_completed(futures):
+                    pbar.update(1)
 
 
 def create_tiles(tif_path='smoke_map.tif', out_dir="smoke_tiles/"):
