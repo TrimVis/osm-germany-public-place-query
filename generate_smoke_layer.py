@@ -7,6 +7,7 @@ from rasterio.windows import bounds, transform as wtransform
 from geopandas import GeoDataFrame
 from dataclasses import dataclass
 import shapely
+import shapely.wkt
 from typing import Any
 from tqdm import tqdm
 import gdal2tiles
@@ -50,7 +51,8 @@ def smoke_mask_callback(public_places):
     no_smoke_gdf.geometry = no_smoke_gdf.buffer(100)
     no_smoke_gdf = no_smoke_gdf.to_crs(epsg=4326)
 
-    def callback(window, transform, window_transform):
+    def callback(no_smoke_wkt, window, transform, window_transform):
+        no_smoke_gdf = shapely.wkt.loads(no_smoke_wkt)
         theight, twidth = (window.height, window.width)
         if debug:
             print("Smoke Mask Callback called")
@@ -68,13 +70,14 @@ def smoke_mask_callback(public_places):
         return None
 
     print("Generated smoke_mask_callback")
-    return callback
+    return (no_smoke_gdf.to_wkt(), callback)
 
 
 def germany_mask_callback():
     germany_shape = get_germany_shape()
 
-    def callback(window, transform, window_transform):
+    def callback(germany_wkt, window, transform, window_transform):
+        germany_shape = shapely.wkt.loads(germany_wkt)
         theight, twidth = (window.height, window.width)
 
         if debug:
@@ -93,20 +96,23 @@ def germany_mask_callback():
         return None
 
     print("Generated germany_mask_callback")
-    return callback
+    return (germany_shape.wkt, callback)
 
 
 def compute_window(output_path, write_lock,
                    window, transform,
-                   create_smoke_mask, get_germany_mask):
+                   no_smoke_wkt, create_smoke_mask,
+                   germany_wkt, get_germany_mask):
     # Compute all values
     world = np.full((4, window.height, window.width),
                     190, dtype=np.uint8)
 
     window_transform = wtransform(window, transform)
     smoke_mask = create_smoke_mask(
+        no_smoke_wkt,
         window=window, transform=transform, window_transform=window_transform)
     germany_mask = get_germany_mask(
+        germany_wkt,
         window=window, transform=transform, window_transform=window_transform)
 
     if germany_mask is not None:
@@ -158,12 +164,13 @@ def create_world_raster(public_places, output_path='smoke_map.tif'):
         # Extract required windows
         windows = [window for _, window in dst.block_windows()]
 
-    create_smoke_mask = smoke_mask_callback(public_places)
-    get_germany_mask = germany_mask_callback()
+    (no_smoke_wkt, create_smoke_mask) = smoke_mask_callback(public_places)
+    (germany_wkt, get_germany_mask) = germany_mask_callback()
     # write the actual tif file content across multiple processes
     with tqdm(total=len(windows)) as pbar:
         with multiprocessing.Manager() as man:
             write_lock = man.Lock()
+
             # for window in windows:
             #     compute_window(
             #         output_path, write_lock,
@@ -171,14 +178,16 @@ def create_world_raster(public_places, output_path='smoke_map.tif'):
             #         create_smoke_mask, get_germany_mask
             #     )
             #     pbar.update(1)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=8) \
+
+            with concurrent.futures.ProcessPoolExecutor(max_workers=8) \
                     as executor:
                 futures = {
                     executor.submit(
                         compute_window,
                         output_path, write_lock,
                         window, transform,
-                        create_smoke_mask, get_germany_mask
+                        no_smoke_wkt, create_smoke_mask,
+                        germany_wkt, get_germany_mask
                     ) for window in windows
                 }
                 for _ in concurrent.futures.as_completed(futures):
