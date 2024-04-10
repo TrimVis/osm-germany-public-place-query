@@ -12,7 +12,7 @@ from typing import Any
 from tqdm import tqdm
 import gdal2tiles
 import multiprocessing
-import concurrent.futures
+import concurrent.futures as con
 
 from extract_public_places import extract_public_places
 from create_german_layer import get_germany_shape
@@ -34,11 +34,10 @@ class SmokeMask:
 def create_smoke_mask(no_smoke_wkt, window, transform, window_transform):
     no_smoke_gdf = shapely.wkt.loads(no_smoke_wkt)
     theight, twidth = (window.height, window.width)
-    if debug:
-        print("Smoke Mask Callback called")
 
     if shapely.box(*bounds(window, transform)) \
-            .intersects(no_smoke_gdf.geometry.any()):
+            .intersects(no_smoke_gdf.geometry).any():
+
         no_smoke_mask = geometry_mask(no_smoke_gdf.geometry,
                                       transform=window_transform,
                                       out_shape=(theight, twidth),
@@ -47,6 +46,7 @@ def create_smoke_mask(no_smoke_wkt, window, transform, window_transform):
         probably_smoke_mask = np.zeros((theight, twidth), dtype=np.bool_)
 
         return SmokeMask(no_smoke_mask, probably_smoke_mask)
+
     return None
 
 
@@ -70,16 +70,12 @@ def smoke_mask_data(public_places):
     no_smoke_gdf.geometry = no_smoke_gdf.buffer(100)
     no_smoke_gdf = no_smoke_gdf.to_crs(epsg=4326)
 
-    print("Generated smoke_mask_callback")
     return no_smoke_gdf.to_wkt()
 
 
 def create_germany_mask(germany_wkt, window, transform, window_transform):
     germany_shape = shapely.wkt.loads(germany_wkt)
     theight, twidth = (window.height, window.width)
-
-    if debug:
-        print("Germany Mask Callback called")
 
     # NOTE pjordan: As we do know some the current coordinates we
     # could significantly speed this up, by calculating the expected
@@ -96,16 +92,12 @@ def create_germany_mask(germany_wkt, window, transform, window_transform):
 
 def germany_mask_data():
     germany_shape = get_germany_shape()
-
-    print("Generated germany_mask_callback")
     return germany_shape.wkt
 
 
 def compute_window(output_path, write_lock,
                    window, transform,
                    no_smoke_wkt, germany_wkt):
-    print(output_path, write_lock,
-          window, transform)
     # Compute all values
     world = np.full((4, window.height, window.width),
                     190, dtype=np.uint8)
@@ -133,10 +125,10 @@ def compute_window(output_path, write_lock,
 
     # Write out computed values at correct position
     with write_lock:
-        print(f"{window}: Writing to file")
+        if debug:
+            print(f"Writing {window} to file")
         with rasterio.open(output_path, 'r+') as dst:
             dst.write(world, window=window)
-        print(f"{window}: Finished writing to file")
 
 
 def create_world_raster(public_places, output_path='smoke_map.tif'):
@@ -169,21 +161,13 @@ def create_world_raster(public_places, output_path='smoke_map.tif'):
 
     no_smoke_wkt = smoke_mask_data(public_places)
     germany_wkt = germany_mask_data()
+
     # write the actual tif file content across multiple processes
     with tqdm(total=len(windows)) as pbar:
         with multiprocessing.Manager() as man:
             write_lock = man.Lock()
 
-            # for window in windows:
-            #     compute_window(
-            #         output_path, write_lock,
-            #         window, transform,
-            #         create_smoke_mask, get_germany_mask
-            #     )
-            #     pbar.update(1)
-
-            with concurrent.futures.ProcessPoolExecutor(max_workers=1) \
-                    as executor:
+            with con.ProcessPoolExecutor(max_workers=8) as executor:
                 futures = {
                     executor.submit(
                         compute_window,
@@ -192,7 +176,7 @@ def create_world_raster(public_places, output_path='smoke_map.tif'):
                         no_smoke_wkt, germany_wkt,
                     ) for window in windows
                 }
-                for _ in concurrent.futures.as_completed(futures):
+                for _ in con.as_completed(futures):
                     pbar.update(1)
 
 
