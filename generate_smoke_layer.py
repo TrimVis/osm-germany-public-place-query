@@ -131,14 +131,15 @@ def compute_window(output_path, write_lock,
             dst.write(world, window=window)
 
 
-def create_world_raster(public_places, output_path='smoke_map.tif'):
+def create_world_raster(width=14400, height=7200,
+                        w_blocks=4, h_blocks=2, max_workers=8,
+                        public_places=None, output_path='smoke_map.tif'):
+    print("Creating world raster data!")
     # Simplified raster dimensions
-    w_blocks, h_blocks = 4, 2
-    width, height = 14400, 7200
     degree = 360 / width
+    # World coverage with a simple pixel degree resolution
     transform = from_origin(-180, 90, degree, degree)
 
-    # World coverage with a simple pixel degree resolution
     # Raster metadata
     metadata = {
         'driver': 'GTiff',
@@ -155,10 +156,13 @@ def create_world_raster(public_places, output_path='smoke_map.tif'):
         'photometric': 'RGB',
     }
 
+    print("Creating empty tif file")
+    # Create a new file with wanted metadata
     with rasterio.open(output_path, 'w', **metadata) as dst:
         # Extract required windows
         windows = [window for _, window in dst.block_windows()]
 
+    print("Getting mask data")
     no_smoke_wkt = smoke_mask_data(public_places)
     germany_wkt = germany_mask_data()
 
@@ -167,7 +171,7 @@ def create_world_raster(public_places, output_path='smoke_map.tif'):
         with multiprocessing.Manager() as man:
             write_lock = man.Lock()
 
-            with con.ProcessPoolExecutor(max_workers=8) as executor:
+            with con.ProcessPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
                     executor.submit(
                         compute_window,
@@ -190,6 +194,11 @@ def create_tiles(tif_path='smoke_map.tif', out_dir="smoke_tiles/"):
 if __name__ == "__main__":
     location = "Waldshut, Baden-Wuerttemberg, Germany"
     public_places = extract_public_places(location)
-    create_world_raster(public_places)
+    create_world_raster(
+        output_path='smoke_map.tif',
+        width=1440000, height=720000,
+        w_blocks=40, h_blocks=20,
+        public_places=public_places
+    )
     # create_tiles()
     # create_tiles()
