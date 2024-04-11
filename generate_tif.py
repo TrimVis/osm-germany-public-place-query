@@ -1,21 +1,23 @@
 import osmnx as ox
 import numpy as np
 import rasterio
-from rasterio.features import geometry_mask
-from rasterio.transform import from_origin
-from rasterio.transform import from_bounds
-from rasterio.windows import bounds, transform as wtransform
-from geopandas import GeoDataFrame
-from dataclasses import dataclass
 import shapely
 import shapely.wkt
-from typing import Any
-from tqdm import tqdm
 import multiprocessing
 import concurrent.futures as con
 
+from pathlib import Path
+from rasterio.features import geometry_mask
+from rasterio.transform import from_origin, from_bounds
+from rasterio.windows import bounds, transform as wtransform
+from geopandas import GeoDataFrame
+from dataclasses import dataclass
+from typing import Any
+from tqdm import tqdm
+
 from config import debug
 from public_places import extract_public_places
+from pedestrian_zones import extract_pedestrian_zones
 
 
 try:
@@ -51,7 +53,15 @@ def create_smoke_mask(*, no_smoke_wkt, window, transform, window_transform):
     return None
 
 
-def smoke_mask_data(public_places):
+def smoke_mask_pedestrian_data(pedestrian_zones):
+    # Add pedestrian zones
+    pz_shapes = [p.shape for p in pedestrian_zones]
+    pz_gdf: Any = GeoDataFrame(geometry=pz_shapes, crs="EPSG:4326")
+
+    return pz_gdf.to_wkt()
+
+
+def smoke_mask_public_place_data(public_places):
     # TODO pjordan: We should also take into consideration the buildings around it
     # Step 1: Find ground level of this building
     # (might need to be extracted in extract_public_places)
@@ -63,13 +73,15 @@ def smoke_mask_data(public_places):
 
     # Simplified approach for now
     # Simply mark everything in a 100m area as no smoke
-    shapes = [p.shape for p in public_places]
-    no_smoke_gdf: Any = GeoDataFrame(geometry=shapes, crs="EPSG:4326")
-    no_smoke_gdf = no_smoke_gdf.to_crs(epsg=32632)
-    no_smoke_gdf.geometry = no_smoke_gdf.buffer(100)
-    no_smoke_gdf = no_smoke_gdf.to_crs(epsg=4326)
+    pp_shapes = [p.shape for p in public_places]
+    pp_gdf: Any = GeoDataFrame(geometry=pp_shapes, crs="EPSG:4326")
 
-    return no_smoke_gdf.to_wkt()
+    # Convert to meter base as intermediate to make growin easier
+    pp_gdf = pp_gdf.to_crs(epsg=32632)
+    pp_gdf.geometry = pp_gdf.buffer(100)
+    pp_gdf = pp_gdf.to_crs(epsg=4326)
+
+    return pp_gdf.to_wkt()
 
 
 def create_germany_mask(*, germany_wkt, window, transform, window_transform):
@@ -131,13 +143,9 @@ def compute_german_window(output_path, write_lock,
             dst.write(world, window=window)
 
 
-def create_german_raster(*,
+def create_german_raster(*, out_path,
                          resolution, max_workers,
-                         no_smoke_wkt, germany_wkt,
-                         out_path):
-    no_smoke_wkt = smoke_mask_data(public_places)
-    germany_wkt = germany_mask_data()
-
+                         no_smoke_wkt, germany_wkt):
     # Extract german bounds
     minx, miny, maxx, maxy = shapely.wkt.loads(germany_wkt).bounds
     width = int((maxx - minx) / resolution)
@@ -160,7 +168,7 @@ def create_german_raster(*,
         'photometric': 'RGB',
     }
 
-    print(" |> Creating germany raster")
+    print(f" |> Creating germany raster ({out_path})")
     # Create a new file with wanted metadata
     with rasterio.open(out_path, 'w', **metadata) as dst:
         # Extract required windows
@@ -206,7 +214,7 @@ def create_world_raster(*, width, height, out_path, germany_wkt):
         'photometric': 'RGB',
     }
 
-    print(" |> Creating world raster")
+    print(f" |> Creating world raster ({out_path})")
     # Create a new tif file with wanted metadata
     with rasterio.open(out_path, 'w', **metadata) as dst:
         windows = [window for _, window in dst.block_windows()]
@@ -238,17 +246,28 @@ def create_tiles(tif_path, out_dir,
 
 # Example usage
 if __name__ == "__main__":
+    # Should be around the number of available cores
+    MAX_WORKERS = 8
+
+    # Cnfigure what files should be create
     _create_tifs = True
-    _create_tiles = True
-    _create_world = False
-    _create_germany = True
+    _create_tiles = False
+
+    _create_world = True
+    _create_germany_pp = True
+    _create_germany_pz = True
+
+    # Make sure an output folder exists
+    Path("output/").mkdir()
 
     if _create_tifs:
         location = "Waldshut, Baden-Wuerttemberg, Germany"
         public_places = extract_public_places(location)
+        pedestrian_zones = extract_pedestrian_zones(location)
 
         print(" |> Extracting mask data")
-        no_smoke_wkt = smoke_mask_data(public_places)
+        no_smoke_public_place_wkt = smoke_mask_public_place_data(public_places)
+        no_smoke_pedestrian_wkt = smoke_mask_pedestrian_data(public_places)
         germany_wkt = germany_mask_data()
 
         print(" |> Creating rasters...")
@@ -256,20 +275,33 @@ if __name__ == "__main__":
             create_world_raster(width=14400,
                                 height=7200,
                                 germany_wkt=germany_wkt,
-                                out_path="world_map.tif")
-        if _create_germany:
+                                out_path="output/world_map.tif")
+        if _create_germany_pp:
             create_german_raster(resolution=0.0001,
-                                 max_workers=8,
-                                 no_smoke_wkt=no_smoke_wkt,
+                                 max_workers=MAX_WORKERS,
+                                 no_smoke_wkt=no_smoke_public_place_wkt,
                                  germany_wkt=germany_wkt,
-                                 out_path="germany_map.tif")
+                                 out_path="output/germany_map_public_places.tif")
+        if _create_germany_pz:
+            create_german_raster(resolution=0.0001,
+                                 max_workers=MAX_WORKERS,
+                                 no_smoke_wkt=no_smoke_pedestrian_wkt,
+                                 germany_wkt=germany_wkt,
+                                 out_path="output/germany_map_pedestrian_zones.tif")
 
     if _create_tiles:
         print(" |> Creating tiles...")
         if _create_world:
             print(" |> Creating world tiles...")
-            create_tiles("world_map.tif", "world_map/",
+            create_tiles("output/world_map.tif", "output/world_map/",
                          zoom="0-5", no_data="1")
-        if _create_germany:
+        if _create_germany_pp:
             print(" |> Creating germany tiles...")
-            create_tiles("germany_map.tif", "germany_map/", zoom="0-4")
+            create_tiles("output/germany_map_public_places.tif",
+                         "output/germany_map_public_places/",
+                         zoom="0-4", max_workers=MAX_WORKERS)
+        if _create_germany_pz:
+            print(" |> Creating germany tiles...")
+            create_tiles("output/germany_map_pedestrian_zones.tif",
+                         "output/germany_map_pedestrian_zones/",
+                         zoom="0-4", max_workers=MAX_WORKERS)

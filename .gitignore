@@ -1,8 +1,6 @@
 cache/
 venv/
 *.osm.pbf
-tiles/
-smoke_tiles/
 __pycache__/
-*.tif
-*_map/
+
+output/
