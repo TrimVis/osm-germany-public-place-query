@@ -85,7 +85,6 @@ def smoke_mask_public_place_data(public_places):
 
 
 def create_germany_mask(*, germany_wkt, window, transform, window_transform):
-    # TODO pjordan: Something is wrong with green in the top left corner
     germany_shape = shapely.wkt.loads(germany_wkt)
     theight, twidth = (window.height, window.width)
 
