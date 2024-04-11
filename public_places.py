@@ -32,8 +32,6 @@ ShapeType = Point | Polygon | MultiPolygon | LineString | MultiLineString
 class PublicPlace:
     institution: Institution
     name: str | None
-    lon: float
-    lat: float
     shape: ShapeType
 
 
@@ -74,20 +72,11 @@ def extract_public_places(place_name, institutions=INSTITUTIONS):
             if not isinstance(name, str):
                 name = None
 
-            # Check the geometry type and extract coordinates accordingly
-            lon, lat = None, None
-            if isinstance(attr.geometry, Point):
-                lon, lat = attr.geometry.x, attr.geometry.y
-            elif isinstance(attr.geometry, (Polygon, MultiPolygon, LineString, MultiLineString)):
-                lon, lat = attr.geometry.centroid.x, attr.geometry.centroid.y
-
-            # Append the school's name and coordinates to the list
-            if lon is not None and lat is not None:
-                data.append(
-                    PublicPlace(institution=institution, name=name,
-                                lon=lon, lat=lat, shape=attr.geometry))
-            else:
-                print("Missing location for institution. Skipping entry")
+            # Append the school's name and geometry
+            data.append(
+                PublicPlace(
+                    institution=institution, name=name, shape=attr.geometry
+                ))
 
     return data
 

@@ -14,13 +14,8 @@ import gdal2tiles
 import multiprocessing
 import concurrent.futures as con
 
-from extract_public_places import extract_public_places
-from create_german_layer import get_germany_shape
-
-# Configure osmx so it doesn't complain about area size
-ox.settings.max_query_area_size = 25000000000
-ox.settings.use_cache = True
-debug = False
+from config import debug
+from public_places import extract_public_places
 
 
 @dataclass(frozen=True)
@@ -28,8 +23,6 @@ class SmokeMask:
     forbidden: Any
     probably: Any
 
-
-# TODO pjordan: Process everything in chunks
 
 def create_smoke_mask(no_smoke_wkt, window, transform, window_transform):
     no_smoke_gdf = shapely.wkt.loads(no_smoke_wkt)
@@ -60,8 +53,6 @@ def smoke_mask_data(public_places):
     #    a) Mark all areas as "potentially visible"  100m around the outline
     #    b) Mark all areas that have a clear direct viewline as "visible"
 
-    # NOTE pjordan: In case we are windowing this is should be precomputed once and not every time
-
     # Simplified approach for now
     # Simply mark everything in a 100m area as no smoke
     shapes = [p.shape for p in public_places]
@@ -77,11 +68,6 @@ def create_germany_mask(germany_wkt, window, transform, window_transform):
     germany_shape = shapely.wkt.loads(germany_wkt)
     theight, twidth = (window.height, window.width)
 
-    # NOTE pjordan: As we do know some the current coordinates we
-    # could significantly speed this up, by calculating the expected
-    # positions first and checking if we could be in germany...
-    # But let's just wait for half an hour for now 😂
-
     if shapely.box(*bounds(window, transform)).intersects(germany_shape):
         return geometry_mask([germany_shape], invert=True,
                              transform=window_transform,
@@ -91,7 +77,12 @@ def create_germany_mask(germany_wkt, window, transform, window_transform):
 
 
 def germany_mask_data():
-    germany_shape = get_germany_shape()
+    # Download the boundary of Germany
+    # germany_gdf = ox.geocode_to_gdf('R51477', by_osmid=True)
+    germany_gdf = ox.geocode_to_gdf('Germany')
+
+    # Get shape
+    germany_shape = germany_gdf.unary_union
     return germany_shape.wkt
 
 
