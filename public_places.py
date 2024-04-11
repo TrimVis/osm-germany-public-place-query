@@ -36,21 +36,21 @@ class PublicPlace:
 
 
 def extract_public_places(place_name, institutions=INSTITUTIONS):
+    print(" |> Extracting public places")
     data = []
 
     for inst in institutions:
         (c, i) = inst.split(":")
-        print(f"{c} - {i}")
         # Query OpenStreetMap for amenities in the specified place
         try:
             g = ox.features_from_place(
                 place_name, tags={c: i}
             )
         except ox._errors.InsufficientResponseError:
-            print(f"Could not find any features for {inst}. Skipping entry")
+            print(f" |> Found no features for {inst}. Skipping...")
             continue
 
-        print(f"Found {len(g)} features for {inst}")
+        print(f" |> Found {len(g)} features for {inst}")
 
         for _, attr in g.iterrows():
             # Detect the institution kind
@@ -63,7 +63,7 @@ def extract_public_places(place_name, institutions=INSTITUTIONS):
                     break
 
             if ikey is None:
-                print("Received unexpected institution")
+                print("Received unexpected institution. Skipping")
                 exit(1)
 
             institution = Institution(ikey)
