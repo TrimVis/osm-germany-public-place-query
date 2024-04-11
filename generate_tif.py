@@ -283,6 +283,10 @@ if __name__ == "__main__":
                                  germany_wkt=germany_wkt,
                                  out_path="output/germany_map_public_places.tif")
         if _create_germany_pedestrian_zones:
+            # NOTE pjordan: We still need way more precision...
+            # tif might not be the best format for this tbh 😅
+            # I will have to look into some possible alternatives that are
+            # vector based (don't know of any so far)
             create_german_raster(resolution=0.0001,
                                  max_workers=MAX_WORKERS,
                                  no_smoke_wkt=no_smoke_pedestrian_wkt,
