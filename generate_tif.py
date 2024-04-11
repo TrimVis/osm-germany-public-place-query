@@ -71,6 +71,12 @@ def smoke_mask_public_place_data(public_places):
     #    a) Mark all areas as "potentially visible"  100m around the outline
     #    b) Mark all areas that have a clear direct viewline as "visible"
 
+    # From what I have found its best to get the topological data using
+    # `elevation`. Which downloads a tif file with topological data
+    # (Or can extend an existing file, like the one we are creating)
+    # We would then need to go over the file again and given all buildings in
+    # the perimeter check if some areas are not visible!
+
     # Simplified approach for now
     # Simply mark everything in a 100m area as no smoke
     pp_shapes = [p.shape for p in public_places]
@@ -289,6 +295,9 @@ if __name__ == "__main__":
             # NOTE pjordan: Alternatively if tif is the only option
             # we might need to split germany into sectors or go over things
             # on a per state basis, or similiar
+            # -> Apparently we can store everything as shape files,
+            #    I however still have to figure out how one would then use that
+            #    to create tiles from
             create_german_raster(resolution=0.0001,
                                  max_workers=MAX_WORKERS,
                                  no_smoke_wkt=no_smoke_pedestrian_wkt,
