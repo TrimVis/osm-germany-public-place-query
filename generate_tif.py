@@ -11,12 +11,19 @@ import shapely
 import shapely.wkt
 from typing import Any
 from tqdm import tqdm
-import gdal2tiles
 import multiprocessing
 import concurrent.futures as con
 
 from config import debug
 from public_places import extract_public_places
+
+
+try:
+    # try to use the custom version that ignores error messages
+    # due to a known gdal issue on arch linux
+    import gdal2tiles_custom.gdal2tiles as gdal2tiles
+except ImportError:
+    import gdal2tiles
 
 
 @dataclass(frozen=True)
@@ -220,7 +227,8 @@ def create_world_raster(*, width, height, out_path, germany_wkt):
             dst.write(world, window=window)
 
 
-def create_tiles(tif_path, out_dir, *, zoom="0-3", max_workers=8, no_data=None):
+def create_tiles(tif_path, out_dir,
+                 *, zoom="0-3", max_workers=8, no_data=None):
     gdal2tiles.generate_tiles(tif_path, out_dir,
                               resume=False, profile="mercator",
                               resampling='average', kml=False,
@@ -260,7 +268,8 @@ if __name__ == "__main__":
         print(" |> Creating tiles...")
         if _create_world:
             print(" |> Creating world tiles...")
-            create_tiles("world_map.tif", "world_map/", zoom="0-5", no_data="1")
+            create_tiles("world_map.tif", "world_map/",
+                         zoom="0-5", no_data="1")
         if _create_germany:
             print(" |> Creating germany tiles...")
             create_tiles("germany_map.tif", "germany_map/", zoom="0-4")

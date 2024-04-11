@@ -1,12 +1,15 @@
 import osmnx as ox
 from pprint import pprint
 from dataclasses import dataclass
-from shapely.geometry import Point, Polygon, LineString, MultiPolygon, MultiLineString
+from shapely.geometry import (
+    Point, Polygon, LineString, MultiPolygon, MultiLineString
+)
 from enum import Enum
+from config import debug
 
-# Configure osmx so it doesn't complain about area size
-ox.settings.max_query_area_size = 25000000000
-ox.settings.use_cache = True
+# Disable type hints and therefore errors for ox library
+from typing import Any
+ox: Any = ox
 
 
 class Institution(Enum):
@@ -40,6 +43,8 @@ def extract_public_places(place_name, institutions=INSTITUTIONS):
     data = []
 
     for inst in institutions:
+        if debug:
+            print(inst)
         (c, i) = inst.split(":")
         # Query OpenStreetMap for amenities in the specified place
         try:

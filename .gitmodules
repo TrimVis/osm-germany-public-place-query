@@ -1,0 +1,3 @@
+[submodule "gdal2tiles_custom"]
+	path = gdal2tiles_custom
+	url = ./gdal2tiles_custom/
