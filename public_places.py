@@ -47,10 +47,10 @@ def extract_public_places(place_name, institutions=INSTITUTIONS):
                 place_name, tags={c: i}
             )
         except ox._errors.InsufficientResponseError:
-            print(f" |> Found no features for {inst}. Skipping...")
+            print(f" |> \t Found no features for {inst}. Skipping...")
             continue
 
-        print(f" |> Found {len(g)} features for {inst}")
+        print(f" |> \t Found {len(g)} features for {inst}")
 
         for _, attr in g.iterrows():
             # Detect the institution kind

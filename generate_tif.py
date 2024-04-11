@@ -256,7 +256,7 @@ if __name__ == "__main__":
         world_path='world_map.tif',
         germany_path='germany_map.tif',
         public_places=public_places,
-        germany_resolution=0.001,
+        germany_resolution=0.0001,
         world_height=7200,
         world_width=14400,
         max_workers=8,
