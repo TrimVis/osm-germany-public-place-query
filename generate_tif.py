@@ -258,7 +258,7 @@ if __name__ == "__main__":
     _create_germany_pedestrian_zones = True
 
     # Make sure an output folder exists
-    Path("output/").mkdir()
+    Path("output/").mkdir(exist_ok=True)
 
     if _create_tifs:
         location = "Waldshut, Baden-Wuerttemberg, Germany"
