@@ -124,48 +124,6 @@ def compute_german_window(output_path, write_lock,
             dst.write(world, window=window)
 
 
-def create_world_raster(*, width, height, out_path, germany_wkt):
-    # World coverage with a simple pixel degree resolution
-    degree = 360 / width
-    transform = from_origin(-180, 90, degree, degree)
-    german_box = shapely.box(*shapely.wkt.loads(germany_wkt).bounds)
-
-    # Raster metadata
-    metadata = {
-        'driver': 'GTiff',
-        'height': height,
-        'width': width,
-        'count': 4,
-        'dtype': 'uint8',
-        'crs': 'EPSG:4326',
-        'transform': transform,
-        'compress': 'deflate',
-        'blockxsize': 3600,
-        'blockysize': 3600,
-        'tiled': True,
-        'photometric': 'RGB',
-    }
-
-    print(" |> Creating world raster")
-    # Create a new tif file with wanted metadata
-    with rasterio.open(out_path, 'w', **metadata) as dst:
-        windows = [window for _, window in dst.block_windows()]
-        for window in tqdm(windows):
-            window_transform = wtransform(window, transform)
-
-            # if it is outside of our german box, make it grey
-            dim = (4, window.height, window.width)
-            world = np.full(dim, 0, dtype=np.uint8)
-
-            # Color all non-german area grey
-            mask = geometry_mask([german_box], transform=window_transform,
-                                 out_shape=(window.height, window.width),
-                                 all_touched=True)
-            world[:, mask] = 190
-
-            dst.write(world, window=window)
-
-
 def create_german_raster(*,
                          resolution, max_workers,
                          no_smoke_wkt, germany_wkt,
@@ -219,47 +177,90 @@ def create_german_raster(*,
                     pbar.update(1)
 
 
-def create_rasters(*,
-                   world_path, germany_path,
-                   germany_resolution, world_height, world_width,
-                   max_workers, public_places):
+def create_world_raster(*, width, height, out_path, germany_wkt):
+    # World coverage with a simple pixel degree resolution
+    degree = 360 / width
+    transform = from_origin(-180, 90, degree, degree)
+    german_box = shapely.box(*shapely.wkt.loads(germany_wkt).bounds)
 
-    print(" |> Extracting mask data")
-    no_smoke_wkt = smoke_mask_data(public_places)
-    germany_wkt = germany_mask_data()
+    # Raster metadata
+    metadata = {
+        'driver': 'GTiff',
+        'height': height,
+        'width': width,
+        'count': 4,
+        'dtype': 'uint8',
+        'crs': 'EPSG:4326',
+        'transform': transform,
+        'compress': 'deflate',
+        'blockxsize': 3600,
+        'blockysize': 3600,
+        'tiled': True,
+        'photometric': 'RGB',
+    }
 
-    print(" |> Creating rasters...")
+    print(" |> Creating world raster")
+    # Create a new tif file with wanted metadata
+    with rasterio.open(out_path, 'w', **metadata) as dst:
+        windows = [window for _, window in dst.block_windows()]
+        for window in tqdm(windows):
+            window_transform = wtransform(window, transform)
 
-    create_world_raster(width=world_width,
-                        height=world_height,
-                        germany_wkt=germany_wkt,
-                        out_path=world_path,)
+            # if it is outside of our german box, make it grey
+            dim = (4, window.height, window.width)
+            world = np.full(dim, 0, dtype=np.uint8)
 
-    create_german_raster(resolution=germany_resolution,
-                         max_workers=max_workers,
-                         no_smoke_wkt=no_smoke_wkt,
-                         germany_wkt=germany_wkt,
-                         out_path=germany_path,)
+            # Color all non-german area grey
+            mask = geometry_mask([german_box], transform=window_transform,
+                                 out_shape=(window.height, window.width),
+                                 all_touched=True)
+            world[:, mask] = 190
+            world[:, ~mask] = 1
+
+            dst.write(world, window=window)
 
 
-def create_tiles(tif_path='smoke_map.tif', out_dir="smoke_tiles/"):
-    gdal2tiles.generate_tiles(
-        tif_path, out_dir, resume=False, zoom="0-3", profile="mercator",
-        kml=False, nb_processes=8, resampling='average')
+def create_tiles(tif_path, out_dir, *, zoom="0-3", max_workers=8, no_data=None):
+    gdal2tiles.generate_tiles(tif_path, out_dir,
+                              resume=False, profile="mercator",
+                              resampling='average', kml=False,
+                              srcnodata=no_data, zoom=zoom,
+                              nb_processes=max_workers,)
 
 
 # Example usage
 if __name__ == "__main__":
-    location = "Waldshut, Baden-Wuerttemberg, Germany"
-    public_places = extract_public_places(location)
-    create_rasters(
-        world_path='world_map.tif',
-        germany_path='germany_map.tif',
-        public_places=public_places,
-        germany_resolution=0.0001,
-        world_height=7200,
-        world_width=14400,
-        max_workers=8,
-    )
-    # create_tiles()
-    # create_tiles()
+    _create_tifs = True
+    _create_tiles = True
+    _create_world = False
+    _create_germany = True
+
+    if _create_tifs:
+        location = "Waldshut, Baden-Wuerttemberg, Germany"
+        public_places = extract_public_places(location)
+
+        print(" |> Extracting mask data")
+        no_smoke_wkt = smoke_mask_data(public_places)
+        germany_wkt = germany_mask_data()
+
+        print(" |> Creating rasters...")
+        if _create_world:
+            create_world_raster(width=14400,
+                                height=7200,
+                                germany_wkt=germany_wkt,
+                                out_path="world_map.tif")
+        if _create_germany:
+            create_german_raster(resolution=0.0001,
+                                 max_workers=8,
+                                 no_smoke_wkt=no_smoke_wkt,
+                                 germany_wkt=germany_wkt,
+                                 out_path="germany_map.tif")
+
+    if _create_tiles:
+        print(" |> Creating tiles...")
+        if _create_world:
+            print(" |> Creating world tiles...")
+            create_tiles("world_map.tif", "world_map/", zoom="0-5", no_data="1")
+        if _create_germany:
+            print(" |> Creating germany tiles...")
+            create_tiles("germany_map.tif", "germany_map/", zoom="0-4")

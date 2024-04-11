@@ -5,3 +5,4 @@ tiles/
 smoke_tiles/
 __pycache__/
 *.tif
+*_map/
