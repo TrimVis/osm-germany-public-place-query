@@ -288,7 +288,7 @@ if __name__ == "__main__":
             # I will have to look into some possible alternatives that are
             # vector based (don't know of any so far)
             # NOTE pjordan: Alternatively if tif is the only option
-            # we might need to split germany into sectors or go over things 
+            # we might need to split germany into sectors or go over things
             # on a per state basis, or similiar
             create_german_raster(resolution=0.0001,
                                  max_workers=MAX_WORKERS,
