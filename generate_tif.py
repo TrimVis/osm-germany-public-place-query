@@ -254,8 +254,8 @@ if __name__ == "__main__":
     _create_tiles = False
 
     _create_world = True
-    _create_germany_pp = True
-    _create_germany_pz = True
+    _create_germany_public_places = False
+    _create_germany_pedestrian_zones = True
 
     # Make sure an output folder exists
     Path("output/").mkdir()
@@ -276,13 +276,13 @@ if __name__ == "__main__":
                                 height=7200,
                                 germany_wkt=germany_wkt,
                                 out_path="output/world_map.tif")
-        if _create_germany_pp:
+        if _create_germany_public_places:
             create_german_raster(resolution=0.0001,
                                  max_workers=MAX_WORKERS,
                                  no_smoke_wkt=no_smoke_public_place_wkt,
                                  germany_wkt=germany_wkt,
                                  out_path="output/germany_map_public_places.tif")
-        if _create_germany_pz:
+        if _create_germany_pedestrian_zones:
             create_german_raster(resolution=0.0001,
                                  max_workers=MAX_WORKERS,
                                  no_smoke_wkt=no_smoke_pedestrian_wkt,
@@ -295,12 +295,12 @@ if __name__ == "__main__":
             print(" |> Creating world tiles...")
             create_tiles("output/world_map.tif", "output/world_map/",
                          zoom="0-5", no_data="1")
-        if _create_germany_pp:
+        if _create_germany_public_places:
             print(" |> Creating germany tiles...")
             create_tiles("output/germany_map_public_places.tif",
                          "output/germany_map_public_places/",
                          zoom="0-4", max_workers=MAX_WORKERS)
-        if _create_germany_pz:
+        if _create_germany_pedestrian_zones:
             print(" |> Creating germany tiles...")
             create_tiles("output/germany_map_pedestrian_zones.tif",
                          "output/germany_map_pedestrian_zones/",
