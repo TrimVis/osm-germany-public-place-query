@@ -1,8 +1,10 @@
-osmnx==1.9.2
+osmnx
 geopandas==0.14.3
 numpy
 rasterio
+gdal==3.8.4
 scipy
 gdal2tiles
 tqdm
-gdal==3.8.4
+pandas
+shapely

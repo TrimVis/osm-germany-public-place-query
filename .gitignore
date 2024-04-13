@@ -2,5 +2,6 @@ cache/
 venv/
 *.osm.pbf
 __pycache__/
-
+state/
+.idea/
 output/
