@@ -117,7 +117,7 @@ def compute_german_window(output_path, write_lock,
                           window, transform,
                           no_smoke_wkt, germany_wkt):
     # Compute all values
-    world = np.full((4, window.height, window.width),
+    world = np.full((1, window.height, window.width),
                     190, dtype=np.uint8)
 
     window_transform = wtransform(window, transform)
@@ -133,18 +133,15 @@ def compute_german_window(output_path, write_lock,
 
     if germany_mask is not None:
         # Mark germany as green initially
-        world[0, germany_mask] = 0
-        world[1, germany_mask] = 255
-        world[2, germany_mask] = 0
+        world[0, germany_mask] = 1
         del germany_mask
 
     if smoke_mask:
         # Mark probably smoke zones
-        world[0, smoke_mask.probably] = 255
+        world[0, smoke_mask.probably] = 2
 
         # Mark no smoke zones
-        world[0, smoke_mask.forbidden] = 255
-        world[1, smoke_mask.forbidden] = 0
+        world[0, smoke_mask.forbidden] = 3
         del smoke_mask
 
     # Write out computed values at correct position
@@ -153,6 +150,8 @@ def compute_german_window(output_path, write_lock,
             print(f"Writing {window} to file")
         with rasterio.open(output_path, 'r+') as dst:
             dst.write(world, window=window)
+        if debug:
+            print(f"Finished writing {window} to file")
 
 
 def create_german_raster(*, out_path,
@@ -169,15 +168,15 @@ def create_german_raster(*, out_path,
         'driver': 'GTiff',
         'height': height,
         'width': width,
-        'count': 4,
+        'count': 1,
         'dtype': 'uint8',
         'crs': 'EPSG:4326',
         'transform': transform,
         'compress': 'LZW',
-        'blockxsize': 144000,
-        'blockysize': 144000,
+        'blockxsize': 288000,
+        'blockysize': 288000,
         'tiled': True,
-        'photometric': 'RGB',
+        'photometric': 'RGBA',
     }
 
     print(f" |> Creating germany raster ({out_path})")
@@ -185,6 +184,13 @@ def create_german_raster(*, out_path,
     with rasterio.open(out_path, 'w', **metadata) as dst:
         # Extract required windows
         windows = [window for _, window in dst.block_windows(1)]
+
+        dst.write_colormap(1, {
+            0: (0, 0, 0, 0),
+            1: (0, 255, 0, 255),
+            2: (255, 255, 0, 255),
+            3: (255, 0, 0, 255)
+        })
 
     gc.collect()
 
