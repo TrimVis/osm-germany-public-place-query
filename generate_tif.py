@@ -7,16 +7,20 @@ import shapely.wkt
 import multiprocessing
 import concurrent.futures as con
 import pandas as pd
+from dataclasses import dataclass
 
+from typing import Any
 from pathlib import Path
 from rasterio.features import geometry_mask
 from rasterio.transform import from_origin, from_bounds
 from rasterio.windows import transform as wtransform
+from rasterio.windows import bounds
 from tqdm import tqdm
 
 from config import debug
 from public_places import extract_public_places
 from pedestrian_zones import extract_pedestrian_zones
+
 
 try:
     # try to use the custom version that ignores error messages
@@ -27,11 +31,45 @@ except ImportError:
 
 from layers import (
     germany_mask_data,
-    create_germany_mask,
     smoke_mask_public_place_data,
     smoke_mask_pedestrian_data,
-    create_smoke_mask,
 )
+
+
+@dataclass(frozen=True)
+class SmokeMask:
+    forbidden: Any
+    probably: Any
+
+
+def create_smoke_mask(*, no_smoke_wkt, window, transform, window_transform):
+    no_smoke_gdf = shapely.wkt.loads(no_smoke_wkt)
+    theight, twidth = (window.height, window.width)
+
+    if shapely.box(*bounds(window, transform)) \
+            .intersects(no_smoke_gdf.geometry).any():
+        no_smoke_mask = geometry_mask(no_smoke_gdf.geometry,
+                                      transform=window_transform,
+                                      out_shape=(theight, twidth),
+                                      invert=True,
+                                      all_touched=True)
+        probably_smoke_mask = np.zeros((theight, twidth), dtype=np.bool_)
+
+        return SmokeMask(no_smoke_mask, probably_smoke_mask)
+
+    return None
+
+
+def create_germany_mask(*, germany_wkt, window, transform, window_transform):
+    germany_shape = shapely.wkt.loads(germany_wkt)
+    theight, twidth = (window.height, window.width)
+
+    if shapely.box(*bounds(window, transform)).intersects(germany_shape):
+        return geometry_mask([germany_shape], invert=True,
+                             transform=window_transform,
+                             out_shape=(theight, twidth),
+                             all_touched=True)
+    return None
 
 
 def compute_german_window(output_path, write_lock,

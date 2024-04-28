@@ -1,37 +1,7 @@
 import osmnx as ox
-import numpy as np
-import shapely
-import shapely.wkt
 
-from rasterio.features import geometry_mask
-from rasterio.windows import bounds
 from geopandas import GeoDataFrame
-from dataclasses import dataclass
 from typing import Any
-
-
-@dataclass(frozen=True)
-class SmokeMask:
-    forbidden: Any
-    probably: Any
-
-
-def create_smoke_mask(*, no_smoke_wkt, window, transform, window_transform):
-    no_smoke_gdf = shapely.wkt.loads(no_smoke_wkt)
-    theight, twidth = (window.height, window.width)
-
-    if shapely.box(*bounds(window, transform)) \
-            .intersects(no_smoke_gdf.geometry).any():
-        no_smoke_mask = geometry_mask(no_smoke_gdf.geometry,
-                                      transform=window_transform,
-                                      out_shape=(theight, twidth),
-                                      invert=True,
-                                      all_touched=True)
-        probably_smoke_mask = np.zeros((theight, twidth), dtype=np.bool_)
-
-        return SmokeMask(no_smoke_mask, probably_smoke_mask)
-
-    return None
 
 
 def smoke_mask_pedestrian_data(pedestrian_zones):
@@ -69,18 +39,6 @@ def smoke_mask_public_place_data(public_places):
     pp_gdf = pp_gdf.to_crs(epsg=4326)
 
     return pp_gdf.to_wkt()
-
-
-def create_germany_mask(*, germany_wkt, window, transform, window_transform):
-    germany_shape = shapely.wkt.loads(germany_wkt)
-    theight, twidth = (window.height, window.width)
-
-    if shapely.box(*bounds(window, transform)).intersects(germany_shape):
-        return geometry_mask([germany_shape], invert=True,
-                             transform=window_transform,
-                             out_shape=(theight, twidth),
-                             all_touched=True)
-    return None
 
 
 def germany_mask_data():

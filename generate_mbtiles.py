@@ -1,188 +1,58 @@
-import gc
-
-import numpy as np
-import rasterio
 import shapely
 import shapely.wkt
-import multiprocessing
-import concurrent.futures as con
 import pandas as pd
+import subprocess
 
 from pathlib import Path
-from rasterio.features import geometry_mask
-from rasterio.transform import from_origin, from_bounds
-from rasterio.windows import transform as wtransform
-from tqdm import tqdm
+from geopandas import GeoDataFrame
 
-from config import debug
 from public_places import extract_public_places
 from pedestrian_zones import extract_pedestrian_zones
 
-try:
-    # try to use the custom version that ignores error messages
-    # due to a known gdal issue on arch linux
-    import gdal2tiles_custom.gdal2tiles as gdal2tiles
-except ImportError:
-    import gdal2tiles
-
 from layers import (
     germany_mask_data,
-    create_germany_mask,
     smoke_mask_public_place_data,
     smoke_mask_pedestrian_data,
-    create_smoke_mask,
 )
 
 
-def compute_german_window(output_path, write_lock,
-                          window, transform,
-                          no_smoke_wkt, germany_wkt):
-    # Compute all values
-    world = np.full((1, window.height, window.width),
-                    190, dtype=np.uint8)
-
-    window_transform = wtransform(window, transform)
-    smoke_mask = create_smoke_mask(
-        no_smoke_wkt=no_smoke_wkt, window=window,
-        transform=transform, window_transform=window_transform)
-    del no_smoke_wkt
-
-    germany_mask = create_germany_mask(
-        germany_wkt=germany_wkt, window=window,
-        transform=transform, window_transform=window_transform)
-    del germany_wkt
-
-    if germany_mask is not None:
-        # Mark germany as green initially
-        world[0, germany_mask] = 1
-        del germany_mask
-
-    if smoke_mask:
-        # Mark probably smoke zones
-        world[0, smoke_mask.probably] = 2
-
-        # Mark no smoke zones
-        world[0, smoke_mask.forbidden] = 3
-        del smoke_mask
-
-    # Write out computed values at correct position
-    with write_lock:
-        if debug:
-            print(f"Writing {window} to file")
-        with rasterio.open(output_path, 'r+') as dst:
-            dst.write(world, window=window)
-        if debug:
-            print(f"Finished writing {window} to file")
-
-
-def create_german_raster(*, out_path,
-                         resolution, max_workers,
-                         no_smoke_wkt, germany_wkt):
-    # Extract german bounds
-    minx, miny, maxx, maxy = shapely.wkt.loads(germany_wkt).bounds
-    width = int((maxx - minx) / resolution)
-    height = int((maxy - miny) / resolution)
-    transform = from_bounds(minx, miny, maxx, maxy, width, height)
-
-    # Raster metadata
-    metadata = {
-        'driver': 'GTiff',
-        'height': height,
-        'width': width,
-        'count': 1,
-        'dtype': 'uint8',
-        'crs': 'EPSG:4326',
-        'transform': transform,
-        'compress': 'LZW',
-        'blockxsize': 144000,
-        'blockysize': 144000,
-        'tiled': True,
-        'photometric': 'RGBA',
-    }
-
-    print(f" |> Creating germany raster ({out_path})")
+def create_vector(*, out_path, wkt, kind=None):
+    gdf = GeoDataFrame(geometry=[shapely.wkt.loads(wkt)])
+    del wkt
+    json = gdf.to_json()
+    print(f" |> Creating {kind + ' ' if kind else ' '}GeoJSON ({out_path})")
     # Create a new file with wanted metadata
-    with rasterio.open(out_path, 'w', **metadata) as dst:
-        # Extract required windows
-        windows = [window for _, window in dst.block_windows(1)]
-
-        dst.write_colormap(1, {
-            0: (0, 0, 0, 0),
-            1: (0, 255, 0, 255),
-            2: (255, 255, 0, 255),
-            3: (255, 0, 0, 255)
-        })
-
-    gc.collect()
-
-    # write the actual tif file content across multiple processes
-    with tqdm(total=len(windows)) as pbar:
-        with multiprocessing.Manager() as man:
-            write_lock = man.Lock()
-
-            with con.ProcessPoolExecutor(max_workers=max_workers) as executor:
-                futures = {
-                    executor.submit(
-                        compute_german_window,
-                        out_path, write_lock,
-                        window, transform,
-                        no_smoke_wkt, germany_wkt,
-                    ) for window in windows
-                }
-                for _ in con.as_completed(futures):
-                    pbar.update(1)
+    with open(out_path, 'w') as f:
+        f.write(json)
 
 
-def create_world_raster(*, width, height, out_path, germany_wkt):
-    # World coverage with a simple pixel degree resolution
-    degree = 360 / width
-    transform = from_origin(-180, 90, degree, degree)
-    german_box = shapely.box(*shapely.wkt.loads(germany_wkt).bounds)
+def check_tippecanoe():
+    print(" |> Checking of tippecanoe is installed")
+    result = subprocess.run(["tippecanoe", "-v"],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # Raster metadata
-    metadata = {
-        'driver': 'GTiff',
-        'height': height,
-        'width': width,
-        'count': 4,
-        'dtype': 'uint8',
-        'crs': 'EPSG:4326',
-        'transform': transform,
-        'compress': 'deflate',
-        'blockxsize': 3600,
-        'blockysize': 3600,
-        'tiled': True,
-        'photometric': 'RGB',
-    }
-
-    print(f" |> Creating world raster ({out_path})")
-    # Create a new tif file with wanted metadata
-    with rasterio.open(out_path, 'w', **metadata) as dst:
-        windows = [window for _, window in dst.block_windows()]
-        for window in tqdm(windows):
-            window_transform = wtransform(window, transform)
-
-            # if it is outside of our german box, make it grey
-            dim = (4, window.height, window.width)
-            world = np.full(dim, 0, dtype=np.uint8)
-
-            # Color all non-german area grey
-            mask = geometry_mask([german_box], transform=window_transform,
-                                 out_shape=(window.height, window.width),
-                                 all_touched=True)
-            world[:, mask] = 190
-            world[:, ~mask] = 1
-
-            dst.write(world, window=window)
+    if result.returncode == 0:
+        print(" |> Success!")
+    else:
+        print(" |> Error: Please install 'tippecanoe' to continue!")
+        exit(1)
 
 
-def create_tiles(tif_path, out_dir,
-                 *, zoom="0-3", max_workers=8, no_data=None):
-    gdal2tiles.generate_tiles(tif_path, out_dir,
-                              resume=False, profile="mercator",
-                              resampling='average', kml=False,
-                              srcnodata=no_data, zoom=zoom,
-                              nb_processes=max_workers, )
+def create_vector_tiles(in_path, out_path, kind=None):
+    print(f" |> Creating {kind + ' ' if kind else ' '}MbTiles ({out_path})")
+    # TODO pjordan: Figure out what flags to pass here
+    result = subprocess.run([
+        "tippecanoe",
+        "-zg", "--drop-densest-as-needed",
+        "--force",
+        "-o", out_path,
+        in_path
+    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    if result.returncode == 0:
+        print(" |> Success!")
+    else:
+        print(" |> Error: \n", result.stderr)
 
 
 # Example usage
@@ -192,7 +62,7 @@ if __name__ == "__main__":
 
     # Configure what files should be created
     _recover_state = True
-    _create_tifs = True
+    _create_vectors = True
     _create_tiles = True
 
     _create_world = True
@@ -204,7 +74,7 @@ if __name__ == "__main__":
     # Make sure an output folder exists
     Path("output/").mkdir(exist_ok=True)
 
-    if _create_tifs:
+    if _create_vectors:
         if _recover_state and Path(f"state/{location}").exists():
             no_smoke_public_place_wkt = pd.read_pickle(
                 f"state/{location}/public_place.wkt")
@@ -229,49 +99,33 @@ if __name__ == "__main__":
                 f"state/{location}/pedestrian.wkt")
             Path(f"state/{location}/germany.wkt").write_text(germany_wkt)
 
-        print(" |> Creating rasters...")
+        print(" |> Creating vectors...")
         if _create_world:
-            create_world_raster(width=1440,
-                                height=720,
-                                germany_wkt=germany_wkt,
-                                out_path="output/world_map.tif")
+            create_vector(wkt=germany_wkt,
+                          out_path="output/world_map.geojson",
+                          kind="German Border Outline")
         if _create_germany_public_places:
-            create_german_raster(resolution=0.000001,
-                                 max_workers=MAX_WORKERS,
-                                 no_smoke_wkt=no_smoke_public_place_wkt,
-                                 germany_wkt=germany_wkt,
-                                 out_path="output/germany_map_public_places.tif")
+            create_vector(wkt=germany_wkt,
+                          out_path="output/public_places.geojson",
+                          kind="German Public Places")
         if _create_germany_pedestrian_zones:
-            # NOTE pjordan: We still need way more precision...
-            # tif might not be the best format for this tbh 😅
-            # I will have to look into some possible alternatives that are
-            # vector based (don't know of any so far)
-            # NOTE pjordan: Alternatively if tif is the only option
-            # we might need to split germany into sectors or go over things
-            # on a per state basis, or similiar
-            # -> Apparently we can store everything as shape files,
-            #    I however still have to figure out how one would then use that
-            #    to create tiles from
-            create_german_raster(resolution=0.000001,
-                                 max_workers=MAX_WORKERS,
-                                 no_smoke_wkt=no_smoke_pedestrian_wkt,
-                                 germany_wkt=germany_wkt,
-                                 out_path="output/germany_map_pedestrian_zones.tif")
+            create_vector(wkt=germany_wkt,
+                          out_path="output/pedestrian_zones.geojson",
+                          kind="German Pedestrian Zones")
 
     if _create_tiles:
+        check_tippecanoe()
+
         print(" |> Creating tiles...")
         if _create_world:
             print(" |> Creating world tiles...")
-            create_tiles("output/world_map.tif", "output/world_map/",
-                         zoom="0-19", no_data="1")
+            create_vector_tiles("output/world_map.geojson",
+                                "output/world_map.mbtiles")
         if _create_germany_public_places:
-            print(" |> Creating germany tiles...")
-            create_tiles("output/germany_map_public_places.tif",
-                         "output/germany_map_public_places/",
-                         zoom="0-19", max_workers=MAX_WORKERS)
+            print(" |> Creating germany public places tiles...")
+            create_vector_tiles("output/public_places.geojson",
+                                "output/public_places.mbtiles")
         if _create_germany_pedestrian_zones:
-            print(" |> Creating germany tiles...")
-            create_tiles("output/germany_map_pedestrian_zones.tif",
-                         "output/germany_map_pedestrian_zones/",
-                         zoom="0-19", max_workers=MAX_WORKERS)
-
+            print(" |> Creating germany pedestrian zone tiles...")
+            create_vector_tiles("output/pedestrian_zones.geojson",
+                                "output/pedestrian_zones.mbtiles")
