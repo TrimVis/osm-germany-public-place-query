@@ -274,3 +274,4 @@ if __name__ == "__main__":
             create_tiles("output/germany_map_pedestrian_zones.tif",
                          "output/germany_map_pedestrian_zones/",
                          zoom="0-19", max_workers=MAX_WORKERS)
+
